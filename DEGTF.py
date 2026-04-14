@@ -10,7 +10,6 @@ def clean_fdr(value):
     if pd.isna(value):
         return None
     try:
-        # Если значение записано как текст с запятой
         if isinstance(value, str):
             value = value.replace(',', '.')
         return float(value)
@@ -27,13 +26,12 @@ def build_deg_mapping(df_deg):
     for index, row in df_deg.iterrows():
         fdr_val = clean_fdr(row.get('FDR'))
         
-        # Проверка условия достоверности (FDR < 0.05)
+        # Фильтр достоверности (FDR < 0.05)
         if fdr_val is not None and fdr_val < 0.05:
             logfc = row.get('logFC')
             target_id = str(row.get('target_id')).strip() if pd.notna(row.get('target_id')) else ""
             locus = str(row.get('locus')).strip() if pd.notna(row.get('locus')) else ""
             
-            # Добавляем в словарь оба варианта ключа, если они существуют
             if target_id:
                 mapping[target_id] = (logfc, fdr_val)
             if locus:
@@ -42,11 +40,9 @@ def build_deg_mapping(df_deg):
     return mapping
 
 def main():
-    # Проверка количества аргументов
     if len(sys.argv) != 5:
         print("Ошибка: Неверное количество аргументов.")
         print("Использование: python DEGTF.py <таблица TF.xlsx> <таблица DEG1.xlsx> <таблица DEG2.xlsx> <выходная таблица.xlsx>")
-        print("Примечание: Если в названиях файлов есть пробелы, берите их в кавычки.")
         sys.exit(1)
 
     tf_file = sys.argv[1]
@@ -54,7 +50,6 @@ def main():
     deg2_file = sys.argv[3]
     output_file = sys.argv[4]
 
-    # Проверка существования входных файлов
     for file in [tf_file, deg1_file, deg2_file]:
         if not os.path.exists(file):
             print(f"Ошибка: Файл '{file}' не найден.")
@@ -69,38 +64,36 @@ def main():
         print(f"Ошибка при чтении файлов Excel: {e}")
         sys.exit(1)
 
-    print("Обработка таблиц DEG...")
+    print("Обработка таблиц DEG и фильтрация по FDR < 0.05...")
     deg1_map = build_deg_mapping(df_deg1)
     deg2_map = build_deg_mapping(df_deg2)
 
-    # Подготовка новых столбцов в таблице TF
+    # Подготовка пустых столбцов
     df_tf['24h'] = None
     df_tf['FDR24'] = None
     df_tf['72h'] = None
     df_tf['FDR72'] = None
 
-    matched_24h_count = 0
-    matched_72h_count = 0
+    matched_both_count = 0
     total_tf_rows = len(df_tf)
 
-    print("Сопоставление данных...")
+    print("Сопоставление данных (строгое пересечение: DEG1 AND DEG2)...")
     for index, row in df_tf.iterrows():
         locus_tag = str(row.get('Locus Tag')).strip()
         
         if pd.isna(row.get('Locus Tag')) or locus_tag == "nan":
             continue
 
-        # Поиск совпадений для 24h (DEG 1)
-        if locus_tag in deg1_map:
+        # СТРОГОЕ УСЛОВИЕ: Locus Tag должен быть в ОБОИХ словарях
+        if locus_tag in deg1_map and locus_tag in deg2_map:
+            # Переносим данные из DEG1
             df_tf.at[index, '24h'] = deg1_map[locus_tag][0]
             df_tf.at[index, 'FDR24'] = deg1_map[locus_tag][1]
-            matched_24h_count += 1
-
-        # Поиск совпадений для 72h (DEG 2)
-        if locus_tag in deg2_map:
+            # Переносим данные из DEG2
             df_tf.at[index, '72h'] = deg2_map[locus_tag][0]
             df_tf.at[index, 'FDR72'] = deg2_map[locus_tag][1]
-            matched_72h_count += 1
+            
+            matched_both_count += 1
 
     print("Сохранение результатов...")
     try:
@@ -110,11 +103,10 @@ def main():
         print(f"Ошибка при сохранении файла: {e}")
         sys.exit(1)
 
-    # Вывод статистики наполненности в консоль
+    # Обновленная статистика
     print("\n--- СТАТИСТИКА НАПОЛНЕННОСТИ ---")
     print(f"Всего транскрипционных факторов в таблице TF: {total_tf_rows}")
-    print(f"Перенесено данных из DEG1 (24h, FDR < 0.05): {matched_24h_count} шт.")
-    print(f"Перенесено данных из DEG2 (72h, FDR < 0.05): {matched_72h_count} шт.")
+    print(f"Успешно перенесено (найдено в обеих таблицах с FDR < 0.05): {matched_both_count} шт.")
     print("--------------------------------")
 
 if __name__ == "__main__":
